@@ -3,6 +3,7 @@ import sys
 import random
 from itertools import combinations
 import os
+
 # Initialize Pygame
 pygame.init()
 
@@ -19,11 +20,11 @@ light_gray = (200, 200, 200)
 dark_gray = (50, 50, 50)
 button_hover = (255, 215, 0)  # 金色
 
-# 設定字體
+#font of word
 font = pygame.font.Font(None, 48)
-button_font = pygame.font.Font(None, 32)  # 調整按鈕字體大小以適應按鈕範圍
+button_font = pygame.font.Font(None, 32)  # size of word
 
-# 背景圖片
+# background
 background_img = pygame.image.load("poker_background.jpg").convert()
 background_img = pygame.transform.scale(background_img, (WIDTH, HEIGHT))
 
@@ -47,6 +48,8 @@ input_active = False
 current_player_index = 0
 current_bet = 0
 pot = 0
+reveal_all = False
+is_single_player = False
 game_stage = "Pre-flop"
 
 music_muted = False
@@ -62,12 +65,12 @@ button_width, button_height = 200, 50
 
 
 def draw_button(rect, text, is_hover):
-    """ 繪製圓角按鈕，確保文字置中 """
+
     color = button_hover if is_hover else white
     pygame.draw.rect(screen, color, rect, border_radius=10)
     pygame.draw.rect(screen, black, rect, 3, border_radius=10)
 
-    # 確保文字在按鈕內置中
+    # sure that the word was in the block
     text_surface = button_font.render(text, True, black)
     text_rect = text_surface.get_rect(center=rect.center)
     screen.blit(text_surface, text_rect.topleft)
@@ -91,12 +94,12 @@ def load_card_images():
 
     try:
         global card_back_image
-        card_back_image = pygame.image.load("backside.jpg")  # ✅ 檔案應放在相同目錄
+        card_back_image = pygame.image.load("backside.jpg")  # loading bacdside of card
         card_back_image = pygame.transform.scale(card_back_image, (CARD_WIDTH, CARD_HEIGHT))
-        images["back"] = card_back_image  # ✅ 把背面卡牌加到 card_images
+        images["back"] = card_back_image  # card_images
     except pygame.error:
-        print("⚠️ Error: Missing 'backside.jpg'. Using default placeholder.")
-        card_back_image = pygame.Surface((CARD_WIDTH, CARD_HEIGHT))  # **備用灰色背景**
+
+        card_back_image = pygame.Surface((CARD_WIDTH, CARD_HEIGHT))  # grey colour
         card_back_image.fill((100, 100, 100))
         images["back"] = card_back_image
 
@@ -118,7 +121,7 @@ class Player:
         self.current_bet = 0
         self.position = position
         self.position_name = position_name
-        self.has_acted = False  # ✅ 新增，追蹤玩家是否行動過
+        self.has_acted = False  # Did the player action
 
 
 def create_players(player_names):
@@ -155,12 +158,12 @@ def handle_betting(action):
             current_bet = raise_amount
             player.current_bet = raise_amount
 
-            # ✅ Reset others' has_acted status
+            #  Reset others' has_acted status
             for p in players:
                 if not p.folded and p != player:
                     p.has_acted = False
 
-            player.has_acted = True  # ✅ This player has acted
+            player.has_acted = True  #  This player has acted
             next_player()
 
         except ValueError:
@@ -199,31 +202,32 @@ def handle_betting(action):
         next_player()
 
 
+
 def next_player():
-    global current_player_index, game_stage
+    global current_player_index
 
-    active_players = [p for p in players if not p.folded and p.chips > 0]
-
-    if len(active_players) == 1:
-
+    # only one ppl left end the ame
+    remaining = [p for p in players if not p.folded]
+    if len(remaining) == 1:
         end_game()
         return
 
-    # 🔁 Move to next player who hasn't folded or busted
+    # find next player action
     for _ in range(len(players)):
         current_player_index = (current_player_index + 1) % len(players)
         current_player = players[current_player_index]
-        if not current_player.folded and current_player.chips > 0 and not current_player.has_acted:
-            break
-    else:
-        # ✅ Everyone has acted -> advance stage
-        advance_game_stage()
-        return
 
-    # ✅ 如果下一位係 AI，延遲觸發 AI 行動（避免畫面卡住）
-    current_player = players[current_player_index]
-    if "AI_" in current_player.name:
-        pygame.time.set_timer(pygame.USEREVENT, 500)
+        if not current_player.folded and current_player.chips > 0 and not current_player.has_acted:
+            # find out next player,and start the timer for ai
+            if "AI_" in current_player.name:
+                pygame.time.set_timer(pygame.USEREVENT, 500)
+            return
+
+    #check all the player has been action
+    if all_players_have_matched_bet_or_all_in():
+        advance_game_stage()
+
+
 
 
 def ask_rebuy(player):
@@ -255,33 +259,42 @@ def ask_rebuy(player):
                     asking = False
 
 
-
 def advance_game_stage():
     global game_stage, community_cards, deck, current_bet, current_player_index
 
     if game_stage == "Pre-flop":
         game_stage = "Flop"
         community_cards.extend(deck.deal(3))
+        current_player_index = get_next_player_after(1)  # SB goes first post-flop
     elif game_stage == "Flop":
         game_stage = "Turn"
         community_cards.extend(deck.deal(1))
+        current_player_index = get_next_player_after(1)
     elif game_stage == "Turn":
         game_stage = "River"
         community_cards.extend(deck.deal(1))
+        current_player_index = get_next_player_after(1)
     elif game_stage == "River":
         end_game()
         return
 
     current_bet = 0
-    current_player_index = 0
-
     for player in players:
+        player.current_bet = 0
         if not player.folded:
             player.has_acted = False
-        player.current_bet = 0
 
-    # ✅ 在新回合開始後立即觸發 AI 行動
     trigger_ai_if_needed()
+
+
+def get_next_player_after(index):
+    for i in range(1, len(players)):
+        next_index = (index + i) % len(players)
+        p = players[next_index]
+        if not p.folded and p.chips > 0:
+            return next_index
+    return index  # fallback，如果搵唔到
+
 
 
 
@@ -292,21 +305,50 @@ def trigger_ai_if_needed():
 
 
 def end_game():
-    global running
+    global running, reveal_all
+    reveal_all = True
 
     active_players = [p for p in players if not p.folded]
 
     if len(active_players) == 1:
         winner = active_players[0]
         winner.chips += pot
-    else:
-        best_hand_player = max(active_players, key=lambda p: evaluate_best_hand(p.hand + community_cards)[0:2])
-        winner = best_hand_player
-        winner.chips += pot
 
-    show_winner_screen(winner.name)
+    else:
+        # thinking the ppl have wt card
+        hand_results = []
+        for p in active_players:
+            rank, values, hand = evaluate_best_hand(p.hand + community_cards)
+            hand_results.append((rank, values, p))
+
+        #   find out the top rank card
+        hand_results.sort(reverse=True)  # follow the rank of the card
+        best_rank, best_values, _ = hand_results[0]
+
+        #   find out is there any people get the same hand
+        winners = [p for r, v, p in hand_results if r == best_rank and v == best_values]
+
+        #  both palyer get half of the pot
+        split_pot = pot // len(winners)
+        for w in winners:
+            w.chips += split_pot
+
+        winner_names = ", ".join(w.name for w in winners)
+
+
+    show_winner_screen(winner_names if len(active_players) > 1 else winner.name)
     running = False
 
+
+def all_players_have_matched_bet_or_all_in():
+    for p in players:
+        if p.folded:
+            continue
+        if p.chips == 0:
+            continue
+        if not p.has_acted or p.current_bet < current_bet:
+            return False
+    return True
 
 
 def hand_rank(hand):
@@ -314,30 +356,30 @@ def hand_rank(hand):
     values = sorted([Card.value_map[card.value] for card in hand], reverse=True)
     suits = [card.suit for card in hand]
 
-    is_flush = len(set(suits)) == 1  # **是否為同花**
-    is_straight = values == list(range(values[0], values[0] - 5, -1))  # **是否為順子**
+    is_flush = len(set(suits)) == 1  # flash
+    is_straight = values == list(range(values[0], values[0] - 5, -1))  # straight
 
     value_counts = {v: values.count(v) for v in set(values)}
 
     if is_flush and is_straight and values[0] == 14:
-        return (10, values)  # 皇家同花順
+        return (10, values)  # royal flush
     if is_flush and is_straight:
-        return (9, values)  # 同花順
+        return (9, values)  # straight flush
     if 4 in value_counts.values():
-        return (8, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # 四條
+        return (8, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # four of kind
     if sorted(value_counts.values()) == [2, 3]:
-        return (7, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # 葫蘆
+        return (7, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # full house
     if is_flush:
-        return (6, values)  # 同花
+        return (6, values)  # flush
     if is_straight:
-        return (5, values)  # 順子
+        return (5, values)  # straight
     if 3 in value_counts.values():
-        return (4, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # 三條
+        return (4, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # three if kind
     if list(value_counts.values()).count(2) == 2:
-        return (3, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # 兩對
+        return (3, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # two pair
     if 2 in value_counts.values():
-        return (2, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # 一對
-    return (1, values)  # 高牌
+        return (2, sorted(value_counts, key=lambda x: (value_counts[x], x), reverse=True))  # pair
+    return (1, values)  # high card
 
 
 def evaluate_best_hand(cards):
@@ -352,54 +394,55 @@ def evaluate_best_hand(cards):
 
 
 def draw_game_screen():
-    screen.fill((34, 139, 34))  # background
+    global reveal_all, is_single_player
+
+    screen.fill((34, 139, 34))  # background of game
 
     table_width = 480
     table_height = 180
     table_x = (WIDTH - table_width) // 2
     table_y = (HEIGHT - table_height) // 2 + 20
 
-    # green
     pygame.draw.ellipse(screen, (0, 100, 0), (table_x, table_y, table_width, table_height))
-
-    # white
     pygame.draw.ellipse(screen, (255, 255, 255), (table_x + 20, table_y + 20, table_width - 40, table_height - 40), 3)
 
-    # player name size
     small_font = pygame.font.Font(None, 22)
 
-    # position of sit
     seat_positions = [
-        (WIDTH // 2 - 180, HEIGHT - 170),  # BTN
-        (WIDTH // 2 + 120, HEIGHT - 170),  # CO
-        (WIDTH - 160, HEIGHT // 2 + 50),   # SB
-        (WIDTH - 160, HEIGHT // 2 - 80),   # BB
-        (WIDTH // 2 + 120, 70),            # UTG
-        (WIDTH // 2 - 180, 70),            # MP1
-        (100, HEIGHT // 2 - 80),           # MP2
-        (100, HEIGHT // 2 + 50)            # MP3
-    ]
-
-    seat_positions = seat_positions[:len(players)]
+        (WIDTH // 2 - 180, HEIGHT - 170),
+        (WIDTH // 2 + 120, HEIGHT - 170),
+        (WIDTH - 160, HEIGHT // 2 + 50),
+        (WIDTH - 160, HEIGHT // 2 - 80),
+        (WIDTH // 2 + 120, 70),
+        (WIDTH // 2 - 180, 70),
+        (100, HEIGHT // 2 - 80),
+        (100, HEIGHT // 2 + 50)
+    ][:len(players)]
 
     for i, player in enumerate(players):
         x, y = seat_positions[i]
 
-        # 👤 玩家名稱：置中顯示，貼住手牌上方 10~15px
+        # name and chip
         name_surface = small_font.render(f"{player.name} (${player.chips})", True, white)
         name_rect = name_surface.get_rect(center=(x + CARD_WIDTH, y - 15))
         screen.blit(name_surface, name_rect)
 
-        # 🂠 顯示玩家手牌，間距更大，避免重疊
         for j, card in enumerate(player.hand):
             card_x = x + j * (CARD_WIDTH + 10)
-            card_image = (
-                card_back_image
-                if i != current_player_index else card_images[f"{card.value}_of_{card.suit}".lower()]
-            )
+
+
+            if reveal_all:
+                card_image = card_images[f"{card.value}_of_{card.suit}".lower()]
+            elif is_single_player and player.name == "You":
+                card_image = card_images[f"{card.value}_of_{card.suit}".lower()]
+            elif not is_single_player and i == current_player_index:
+                card_image = card_images[f"{card.value}_of_{card.suit}".lower()]
+            else:
+                card_image = card_back_image
+
             screen.blit(card_image, (card_x, y))
 
-    # location of com card
+    # drawing the card
     for i in range(5):
         card_x = WIDTH // 2 - 150 + i * (CARD_WIDTH + 10)
         card_y = HEIGHT // 2 - 20
@@ -409,10 +452,10 @@ def draw_game_screen():
         else:
             screen.blit(card_back_image, (card_x, card_y))
 
-    # HUD
+    # hud
     hud_x, hud_y = 20, 20
     hud_surface = pygame.Surface((200, 60), pygame.SRCALPHA)
-    hud_surface.fill((50, 50, 50, 200))  # 半透明背景
+    hud_surface.fill((50, 50, 50, 200))
     screen.blit(hud_surface, (hud_x, hud_y))
     pygame.draw.rect(screen, white, (hud_x, hud_y, 200, 60), 2, border_radius=10)
 
@@ -424,10 +467,10 @@ def draw_game_screen():
         line_surface = small_font.render(line, True, white)
         screen.blit(line_surface, (hud_x + 10, hud_y + 5 + i * 20))
 
-
     draw_buttons()
     pygame.display.flip()
     draw_mute_button()
+
 
 
 def draw_buttons():
@@ -512,15 +555,13 @@ def handle_event(event):
 
     elif event.type == pygame.KEYDOWN and input_active:
         if event.key == pygame.K_RETURN:
-            input_active = False  # 按 Enter 退出輸入模式
+            input_active = False  # press enter
             if bet_amount.strip().isdigit():
-                handle_betting("Raise")  # ✅ 確認 Raise 行為
-            else:
-                print("\u26a0\ufe0f 請輸入合法的 Raise 金額")
+                handle_betting("Raise")  # raise
         elif event.key == pygame.K_BACKSPACE:
-            bet_amount = bet_amount[:-1]  # 刪除最後一個數字
+            bet_amount = bet_amount[:-1]  # delete the bet
         elif event.unicode.isdigit():
-            bet_amount += event.unicode  # 只允許輸入數字
+            bet_amount += event.unicode  # input the bet
 
 
 def main_game_loop():
@@ -528,7 +569,7 @@ def main_game_loop():
     running = True
     clock = pygame.time.Clock()
 
-    # 🔁 Start of loop: check if first player is AI
+    #  Start of loop: check if first player is AI
     current_player = players[current_player_index]
     if "AI_" in current_player.name:
         pygame.time.set_timer(pygame.USEREVENT, 500)
@@ -551,8 +592,6 @@ def main_game_loop():
                 handle_event(event)
 
         clock.tick(30)
-
-    print("\U0001f0cf 本局結束，準備下一局...")
 
 
 
@@ -579,7 +618,7 @@ community_cards = []
 def assign_positions():
     poker_positions = ["BTN", "CO", "SB", "BB", "UTG", "MP1", "MP2", "MP3"]
 
-    # 確保玩家數量符合撲克座位限制
+    # sure the player was in the correct position
     if len(players) > len(poker_positions):
         return
 
@@ -590,30 +629,82 @@ def assign_positions():
         print(f"{p.name}: {p.position_name}")
 
 
-def start_game(player_names):
-    global deck, game_stage, current_bet, pot, community_cards, players
+def start_single_player():
+    global players, deck, game_stage, current_bet, pot, community_cards
+    global current_player_index, is_single_player, reveal_all
 
-    create_players(player_names)
+    is_single_player = True
+    reveal_all = False
+
+    players = [Player("You", (150, 500), position_name="BTN")]
+    ai_names = ["AI_1", "AI_2", "AI_3", "AI_4", "AI_5"]
+    for i, name in enumerate(ai_names):
+        players.append(Player(name, (150 + i * 100, 100), position_name=f"AI_{i + 1}"))
 
     while len([p for p in players if p.chips > 0]) > 1:
+        reveal_all = False
         deck = Deck()
 
-        # 旋轉莊家
         players = players[1:] + [players[0]]
         assign_positions()
 
-        # 發牌 & 重設狀態
-        for player in players:
-            player.hand = deck.deal(2)
-            player.folded = False
-            player.current_bet = 0
+        reset_player_states()
 
         game_stage = "Pre-flop"
         current_bet = 10
         pot = 0
         community_cards = []
 
-        # 設置盲注
+        small_blind = 5
+        big_blind = 10
+        sb_index = 2
+        bb_index = 3
+
+        players[sb_index].chips -= small_blind
+        players[sb_index].current_bet = small_blind
+        pot += small_blind
+
+        players[bb_index].chips -= big_blind
+        players[bb_index].current_bet = big_blind
+        pot += big_blind
+
+        current_player_index = get_next_player_after(bb_index)
+
+        main_game_loop()
+
+        for player in players:
+            if player.chips == 0:
+                ask_rebuy(player)
+
+    winner = [p for p in players if p.chips > 0][0]
+
+
+
+
+def start_game(player_names):
+    global deck, game_stage, current_bet, pot, community_cards, players
+    global reveal_all, is_single_player, current_player_index
+
+    is_single_player = False  # Multiplayer mode
+    reveal_all = False
+
+    create_players(player_names)
+
+    while len([p for p in players if p.chips > 0]) > 1:
+        reveal_all = False
+        deck = Deck()
+
+        players = players[1:] + [players[0]]  # Rotate dealer (BTN)
+        assign_positions()
+
+        reset_player_states()
+
+        game_stage = "Pre-flop"
+        current_bet = 10
+        pot = 0
+        community_cards = []
+
+        # Set blinds
         small_blind = 5
         big_blind = 10
         sb_player = players[2]
@@ -627,20 +718,25 @@ def start_game(player_names):
         bb_player.current_bet = big_blind
         pot += big_blind
 
-        # UTG 行動
-        global current_player_index
-        current_player_index = 4 % len(players)
+        bb_index = 3
+        current_player_index = get_next_player_after(bb_index)
 
-        # 主回合
         main_game_loop()
 
-        # === 🔁 遊戲完後檢查誰輸光籌碼並詢問是否 rebuy ===
         for player in players:
             if player.chips == 0:
                 ask_rebuy(player)
 
-    # 最終勝者
     winner = [p for p in players if p.chips > 0][0]
+
+
+
+def reset_player_states():
+    for player in players:
+        player.hand = deck.deal(2)
+        player.folded = False
+        player.current_bet = 0
+        player.has_acted = False
 
 
 
@@ -653,11 +749,11 @@ def show_winner_screen(winner_name):
     while True:
         screen.blit(background_img, (0, 0))
 
-        # 顯示獲勝者名稱
+        # show winner name
         text = font_big.render(f"{winner_name} winner!", True, white)
         screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - 50))
 
-        # 顯示「繼續遊戲」按鈕
+        # continue game button
         mouse_pos = pygame.mouse.get_pos()
         is_hover = continue_button.collidepoint(mouse_pos)
         draw_button(continue_button, "continue", is_hover)
@@ -670,7 +766,7 @@ def show_winner_screen(winner_name):
                 sys.exit()
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if continue_button.collidepoint(event.pos):
-                    return  # 離開這個畫面，繼續遊戲
+                    return  # leave the game
 
 
 def ask_player_count():
@@ -683,37 +779,37 @@ def ask_player_count():
     font_small = pygame.font.Font(None, 30)
 
     while True:
-        screen.fill((34, 139, 34))  # ✅ 背景改為更柔和的綠色
+        screen.fill((34, 139, 34))  # background
 
 
-        # ✅ 讓背景框變成 深綠色 + 透明（比背景略深一點）
+        # background
         popup_surface = pygame.Surface((400, 250), pygame.SRCALPHA)
-        popup_surface.fill((0, 120, 0, 180))  # 調整為更柔和的綠色
+        popup_surface.fill((0, 120, 0, 180))
         screen.blit(popup_surface, (WIDTH // 2 - 200, HEIGHT // 2 - 125))
 
 
-        # ✅ 顯示標題
+        # title
         title_text = font_large.render("Number of Players", True, white)
         screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT // 2 - 100))
 
         subtitle_text = font_small.render("(6 - 8 players)", True, white)
         screen.blit(subtitle_text, (WIDTH // 2 - subtitle_text.get_width() // 2, HEIGHT // 2 - 70))
 
-        # ✅ 美化輸入框
+        # input block
         pygame.draw.rect(screen, white, input_box, border_radius=12)
         pygame.draw.rect(screen, black, input_box, 2, border_radius=12)
 
-        # ✅ 顯示輸入內容
+        # show the contact
         txt_surface = font_large.render(player_count, True, black)
         screen.blit(txt_surface, (input_box.x + 50, input_box.y + 5))
 
-        # ✅ 按鈕（Hover 效果）
+
         mouse_pos = pygame.mouse.get_pos()
         button_color = (255, 255, 255) if not start_button.collidepoint(mouse_pos) else (200, 200, 200)
         pygame.draw.rect(screen, button_color, start_button, border_radius=12)
         pygame.draw.rect(screen, black, start_button, 2, border_radius=12)
 
-        # ✅ 顯示按鈕文字
+        # show test contact
         start_text = font_medium.render("Start", True, black)
         screen.blit(start_text, (start_button.x + 45, start_button.y + 10))
 
@@ -729,14 +825,14 @@ def ask_player_count():
                 else:
                     active = False
 
-                # ✅ 按 Start 鍵
+                # start button
                 if start_button.collidepoint(event.pos):
                     try:
                         num_players = int(player_count)
                         if 6 <= num_players <= 8:
                             return num_players
                     except ValueError:
-                        player_count = "6"  # 重置輸入
+                        player_count = "6"  # at least 6 player
 
             if event.type == pygame.KEYDOWN and active:
                 if event.key == pygame.K_RETURN:
@@ -745,11 +841,11 @@ def ask_player_count():
                         if 6 <= num_players <= 8:
                             return num_players
                     except ValueError:
-                        player_count = "6"  # 重置輸入
+                        player_count = "6"  # reinput
                 elif event.key == pygame.K_BACKSPACE:
                     player_count = player_count[:-1]
                 elif event.unicode.isdigit() and len(player_count) < 1:
-                    player_count = event.unicode  # 只允許 6、7、8
+                    player_count = event.unicode  # only achieve 6 - 8
 
 
 
@@ -764,7 +860,7 @@ def get_player_names(num_players):
     confirm_button = pygame.Rect(WIDTH // 2 - 60, HEIGHT // 2 + 70, 120, 45)
 
     while len(player_names) < num_players:
-        screen.blit(background_img, (0, 0))  # ✅ Use background
+        screen.blit(background_img, (0, 0))  #  Use background
         prompt = title_font.render(f"Enter name for Player {len(player_names) + 1} ({len(player_names)+1}/{num_players}):", True, white)
         screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, HEIGHT // 2 - 100))
 
@@ -813,7 +909,7 @@ def get_player_names(num_players):
 
 
 def main_menu():
-    """ 主選單畫面 """
+    """ main menu """
 
     pygame.mixer.music.load("game_background.ogg")
     pygame.mixer.music.set_volume(0.3)
@@ -833,7 +929,7 @@ def main_menu():
         mouse_pos = pygame.mouse.get_pos()
         draw_button(start_button, "Start Game", start_button.collidepoint(mouse_pos))
         draw_button(exit_button, "Exit", exit_button.collidepoint(mouse_pos))
-        draw_mute_button()  # ✅ 畫出靜音按鈕
+        draw_mute_button()  #  mute button
 
         pygame.display.flip()
 
@@ -843,13 +939,13 @@ def main_menu():
                 sys.exit()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if mute_button.collidepoint(event.pos):  # ✅ 加返呢段！
+                if mute_button.collidepoint(event.pos):
                     music_muted = not music_muted
                     if music_muted:
                         pygame.mixer.music.pause()
                     else:
                         pygame.mixer.music.unpause()
-                    continue  # ✅ 避免再執行 start/exit click
+                    continue  # start and exit click
 
                 if start_button.collidepoint(event.pos):
                     game_mode_menu()
@@ -860,7 +956,7 @@ def main_menu():
 
 
 def game_mode_menu():
-    """ 遊戲模式選單 """
+    """ game mode """
     running = True
     while running:
         screen.blit(background_img, (0, 0))
@@ -894,69 +990,12 @@ def game_mode_menu():
                     main_menu()
 
 def get_next_player_after(index):
-    """ 從 index 之後開始找下一位未棄牌且未破產的玩家 """
     for i in range(1, len(players)):
         next_index = (index + i) % len(players)
         p = players[next_index]
         if not p.folded and p.chips > 0:
             return next_index
-    return index  # fallback，如果找唔到就原地
-
-def start_single_player():
-    global players, deck, game_stage, current_bet, pot, community_cards, current_player_index
-
-    # 初始化玩家（一次性創建）
-    players = [Player("You", (150, 500), position_name="BTN")]
-    ai_names = ["AI_1", "AI_2", "AI_3", "AI_4", "AI_5"]
-    for i, name in enumerate(ai_names):
-        players.append(Player(name, (150 + i * 100, 100), position_name=f"AI_{i + 1}"))
-
-    while len([p for p in players if p.chips > 0]) > 1:
-        print("\n🎲 開始新的一局！\n")
-        deck = Deck()
-
-        # 👉 轉莊家（BTN）
-        players = players[1:] + [players[0]]
-        assign_positions()
-
-        # 發牌 & 狀態初始化
-        for player in players:
-            player.hand = deck.deal(2)
-            player.folded = False
-            player.current_bet = 0
-
-        game_stage = "Pre-flop"
-        current_bet = 10
-        pot = 0
-        community_cards = []
-
-        # 設置盲注
-        small_blind = 5
-        big_blind = 10
-        sb_index = 2
-        bb_index = 3
-
-        players[sb_index].chips -= small_blind
-        players[sb_index].current_bet = small_blind
-        pot += small_blind
-
-        players[bb_index].chips -= big_blind
-        players[bb_index].current_bet = big_blind
-        pot += big_blind
-
-        # ✅ 設定首位行動者為 BB 後第一位有效玩家
-        current_player_index = get_next_player_after(bb_index)
-
-        main_game_loop()
-
-        # 檢查輸光籌碼玩家
-        for player in players:
-            if player.chips == 0:
-                ask_rebuy(player)
-
-    # 最終勝者
-    winner = [p for p in players if p.chips > 0][0]
-    print(f"\n🏆 最終勝者：{winner.name}！\n")
+    return index  # fallback
 
 
 
@@ -968,12 +1007,12 @@ def ai_decision(player):
     if best_rank >= 7:
         action = "All-In"
 
-    elif best_rank >= 5:  # 同花或順子
+    elif best_rank >= 5:  # flush or straight
         raise_amount = max(current_bet * 2, 10)
         bet_amount = str(int(raise_amount))
         action = "Raise"
 
-    elif best_rank >= 3:  # 兩對或三條
+    elif best_rank >= 3:  # two pair or three of kind
         if random.random() > 0.3:
             action = "Call"
         else:
